@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/fluxtex-app",
+    "crates/fluxtex-signal"
+]
+resolver = "2"
