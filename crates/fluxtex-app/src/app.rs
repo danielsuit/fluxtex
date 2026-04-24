@@ -5,11 +5,29 @@ use crate::document::compiler::{CompilerThread, CompileResult};
 use crate::document::pdf_render::render_pdf_to_png;
 use crossbeam_channel::unbounded;
 use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub fn app_view() -> impl View {
     // Basic state signals
     let doc_buffer = Arc::new(Mutex::new(DocumentBuffer::new()));
     let content_signal = create_rw_signal(String::new());
+    
+    // CRDT Local Tracker
+    let previous_text = Rc::new(RefCell::new(String::new()));
+    let doc_buffer_clone = doc_buffer.clone();
+    let content_tracker_sig = content_signal;
+    create_effect(move |_| {
+        let new_text = content_tracker_sig.get();
+        let mut prev = previous_text.borrow_mut();
+        if new_text != *prev {
+            let mut db = doc_buffer_clone.lock().unwrap();
+            crate::document::buffer_diff::apply_text_diff(&mut db, &prev, &new_text);
+            *prev = new_text;
+            // Optionally, debug print the CRDT content length
+            // println!("CRDT length: {}", db.content.len());
+        }
+    });
     
     // PDF View output
     let pdf_status = create_rw_signal("Ready".to_string());

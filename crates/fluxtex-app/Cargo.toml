@@ -22,4 +22,5 @@ uuid = { version = "1", features = ["v4", "serde"] }
 futures-util = "0.3"
 crossbeam-channel = "0.5" # optional for thread comms if std::sync::mpsc isn't enough
 image = "0.25.10"
+similar = "3.1.0"
 # need to add regex for syntect if not bundled or other text stuff
