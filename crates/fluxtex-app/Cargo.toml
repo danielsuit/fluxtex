@@ -9,7 +9,7 @@ tectonic = "0.16"
 # pdfium-render requires native library, we will mention this in README
 pdfium-render = "0.8"
 syntect = "5.2"
-cola = { package = "cola-crdt", version = "0.1" }
+cola = { package = "cola-crdt", version = "0.1.1", features = ["serde"] }
 datachannel = "0.15"
 tokio = { version = "1", features = ["full", "sync", "time"] }
 tokio-tungstenite = "0.21"

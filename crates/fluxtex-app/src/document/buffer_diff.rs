@@ -12,14 +12,17 @@ pub fn apply_text_diff(doc_buffer: &mut DocumentBuffer, old_text: &str, new_text
         match change.tag() {
             ChangeTag::Delete => {
                 let len = change.value().len();
-                // Assuming doc_buffer.delete_local works via char offsets if we use bytes
-                // Let's assume byte offsets for now
-                doc_buffer.delete_local(offset, len);
-                // We do NOT advance offset because the text shifted left
+                if let Some(deletion) = doc_buffer.delete_local(offset, len) {
+                    // TODO: Serialize and broadcast deletion to network
+                    // let _msg = SyncMessage::Delete { deletion: serialize(&deletion) };
+                }
             }
             ChangeTag::Insert => {
                 let text = change.value();
-                doc_buffer.insert_local(offset, text);
+                if let Some(insertion) = doc_buffer.insert_local(offset, text) {
+                    // TODO: Serialize and broadcast insertion to network
+                    // let _msg = SyncMessage::Insert { insertion: serialize(&insertion), text: text.to_string() };
+                }
                 offset += text.len();
             }
             ChangeTag::Equal => {
