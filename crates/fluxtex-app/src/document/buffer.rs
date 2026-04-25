@@ -1,4 +1,4 @@
-use cola::{Replica, Insertion, Deletion};
+use cola::{Deletion, Insertion, Replica, ReplicaId};
 
 pub struct DocumentBuffer {
     replica: Replica,
@@ -7,8 +7,12 @@ pub struct DocumentBuffer {
 
 impl DocumentBuffer {
     pub fn new() -> Self {
+        Self::with_replica_id(1)
+    }
+
+    pub fn with_replica_id(replica_id: ReplicaId) -> Self {
         Self {
-            replica: Replica::new(1, 0),
+            replica: Replica::new(replica_id, 0),
             content: String::new(),
         }
     }
@@ -35,6 +39,13 @@ impl DocumentBuffer {
         if let Some(offset) = self.replica.integrate_insertion(&insertion) {
             // In a real editor we need to map CRDT offsets to string indices accurately
             self.content.insert_str(offset, text);
+        }
+    }
+
+    pub fn integrate_remote_delete(&mut self, deletion: Deletion) {
+        let ranges = self.replica.integrate_deletion(&deletion);
+        for range in ranges.into_iter().rev() {
+            self.content.replace_range(range, "");
         }
     }
 }
