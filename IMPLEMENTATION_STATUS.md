@@ -5,7 +5,9 @@ This document records what is already in place in the current workspace and what
 ## What Has Been Done
 
 - The app shell is in place with a split editor/preview layout in `crates/fluxtex-app/src/app.rs`.
+- The UI shell has been upgraded to a professional three-pane workspace in `crates/fluxtex-app/src/app.rs` with toolbar, collapsible navigation and preview panels, outline and problems areas, and a status bar.
 - Local LaTeX compilation is wired through `CompilerThread` and the compile result is shown in the UI.
+- Local LaTeX compilation now runs through the external Tectonic CLI in `crates/fluxtex-app/src/document/compiler.rs`, with support for repo-local binaries and bundles under `vendor/tectonic`.
 - PDF output is rendered to PNG with `pdfium-render` in `crates/fluxtex-app/src/document/pdf_render.rs`.
 - Local CRDT tracking is present in `crates/fluxtex-app/src/document/buffer_diff.rs` using `similar` to compute text changes.
 - A network message protocol exists in `crates/fluxtex-app/src/document/network.rs` with `SyncMessage` for insert and delete operations, plus bincode encode/decode helpers and remote-apply helpers.
@@ -18,6 +20,7 @@ This document records what is already in place in the current workspace and what
 - The app entry point launches the Floem UI from `crates/fluxtex-app/src/main.rs`.
 - The signaling crate exists at `crates/fluxtex-signal`, and a placeholder binary currently prints a startup message.
 - The app has been compiled and launched successfully in the workspace during verification.
+- The app no longer depends on the Rust `tectonic` crate at build time, so `cargo check -p fluxtex-app` is no longer blocked by the `icu-uc` build dependency from that crate.
 
 ## What Still Needs To Be Put In Place
 
@@ -26,15 +29,17 @@ This document records what is already in place in the current workspace and what
 - Persist and exchange SDP/ICE data between peers so the connection can actually complete without manual copy-paste.
 - Implement the signaling server in `crates/fluxtex-signal` if the project should support a relay-based mode in addition to local file signaling.
 - Connect remote collaboration events back into the reactive editor state so received inserts/deletes update the visible text without being mistaken for local edits.
+- Replace the current `text_input`-based document area with a richer multiline/code editor widget that can support syntax highlighting, gutter diagnostics, and command-palette-grade editing affordances.
 - Add a basic two-instance test flow to confirm edits propagate in both directions.
 
 ## Current Gaps By Area
 
 ### UI
 
-- No Host/Join controls are exposed yet.
-- No connection status indicator is wired into the editor.
-- Incoming remote text is not yet pushed back into the Floem text input state.
+- The app now has the right shell structure, but Host/Join collaboration controls are not exposed yet.
+- The problems panel currently shows human-readable compile state text, but not parsed TeX diagnostics with clickable file/line jumps.
+- The editor surface still uses a basic text input rather than a full code editor with syntax coloring, minimap, gutter markers, and true distraction-free behavior.
+- Incoming remote text is not yet pushed back into the Floem editor state.
 
 ### Networking
 
@@ -53,11 +58,11 @@ This document records what is already in place in the current workspace and what
 
 ## Suggested Next Order Of Work
 
-1. Wire file-based SDP and ICE exchange for two local peers using the queued `SignalingEvent`s.
-2. Hook `CollaborationSession` into `app.rs` so local edits are broadcast and remote edits update the Floem text state safely.
-3. Add Host/Join controls and connection status feedback.
-4. Verify two running app instances propagate edits in both directions.
-5. Fill in the signaling crate if relay-based collaboration is still required.
+1. Replace the editor surface with a richer Floem editor component so the new shell can support line-aware editing and diagnostics.
+2. Hook `CollaborationSession` into `app.rs` so local edits are broadcast and remote edits update the visible text state safely.
+3. Wire file-based SDP and ICE exchange for two local peers using the queued `SignalingEvent`s.
+4. Add Host/Join controls and connection status feedback.
+5. Verify two running app instances propagate edits in both directions.
 
 ## Notes
 

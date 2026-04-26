@@ -1,14 +1,13 @@
-use floem::*;
-
-mod document;
-mod ui;
-mod collab;
-mod highlight;
 mod app;
+mod collab;
+mod document;
+mod highlight;
+mod macos_menu;
+mod ui;
 
 fn main() {
     tracing_subscriber::fmt::init();
-    
+
     // Spawn tokio runtime
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
