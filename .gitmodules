@@ -1,0 +1,3 @@
+[submodule "vendor/aldutex"]
+	path = vendor/aldutex
+	url = https://github.com/danielsuit/aldutex
