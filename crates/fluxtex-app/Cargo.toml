@@ -5,11 +5,10 @@ edition = "2021"
 
 [dependencies]
 aldutex = { path = "../../vendor/aldutex" }
+fluxtex-signal = { path = "../fluxtex-signal" }
 floem = "0.2.0"
-# pdfium-render requires native library, we will mention this in README
 pdfium-render = "0.8"
-syntect = "5.2"
-cola = { package = "cola-crdt", version = "0.1.1", features = ["serde"] }
+cola = { package = "cola-crdt", version = "0.1.1", features = ["serde", "encode"] }
 datachannel = "0.15"
 tokio = { version = "1", features = ["full", "sync", "time"] }
 tokio-tungstenite = "0.21"
@@ -20,10 +19,9 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1", features = ["v4", "serde"] }
 futures-util = "0.3"
-crossbeam-channel = "0.5" # optional for thread comms if std::sync::mpsc isn't enough
+crossbeam-channel = "0.5"
 image = "0.25.10"
 similar = "3.1.0"
-# need to add regex for syntect if not bundled or other text stuff
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5.2"

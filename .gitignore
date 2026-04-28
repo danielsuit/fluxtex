@@ -11,6 +11,7 @@
 # IDE
 .idea/
 .vscode/
+.claude/
 
 # Vendored binaries — fetched out-of-band, not tracked in git
 # (headers and license files in vendor/ are kept)
@@ -21,6 +22,10 @@ vendor/tectonic/bin/*.exe
 vendor/tectonic/bundles/*.zip
 vendor/tectonic/bundles/*.tar
 vendor/tectonic/bundles/*.tar.gz
+
+# Demo / autosave artifacts
+.demo/
+main.tex
 
 # Logs / temp
 *.log
