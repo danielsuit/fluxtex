@@ -630,19 +630,18 @@ pub fn app_view() -> impl View {
     create_effect(move |_| {
         if let Some(res) = compile_results.get() {
             match res {
-                CompileResult::Ok(data) => {
-                    let status = format!("Compiled PDF successfully: {} bytes", data.len());
+                CompileResult::Ok { pdf, engine } => {
+                    let status = format!("Compiled PDF successfully: {} bytes", pdf.len());
                     pdf_status.set(status.clone());
 
-                    match render_pdf_to_png(&data) {
+                    match render_pdf_to_png(&pdf) {
                         Ok(pages) => {
                             let page_count = pages.len();
+                            let pdf_len = pdf.len();
                             rendered_pages
                                 .set(pages.into_iter().map(Rc::new).collect());
                             compile_log.set(format!(
-                                "Build finished successfully.\n\nOutput size: {} bytes\nPages rendered: {}\nStatus: PDF rendered and ready for preview.",
-                                data.len(),
-                                page_count
+                                "Build finished successfully.\n\nEngine: {engine}\nOutput size: {pdf_len} bytes\nPages rendered: {page_count}\nStatus: PDF rendered and ready for preview."
                             ));
                         }
                         Err(err) => {
@@ -1165,66 +1164,63 @@ pub fn app_view() -> impl View {
                                 .border_color(theme.border)
                         });
 
-                        let preview_body = dyn_container(
-                            move || rendered_pages.get().len(),
-                            move |page_count| {
-                                if page_count > 0 {
-                                    let pages = rendered_pages.get();
-                                    let page_views: Vec<_> = pages
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(idx, page)| {
-                                            let page = page.clone();
-                                            let bytes = page.png.clone();
-                                            let iw = page.width as f64;
-                                            let ih = page.height as f64;
-                                            v_stack((
-                                                label(move || format!("Page {}", idx + 1)).style(
-                                                    move |s| {
-                                                        s.font_size(11.0)
-                                                            .color(theme.text_muted)
-                                                            .padding_vert(4.0)
-                                                    },
-                                                ),
-                                                img(move || bytes.clone()).style(move |s| {
-                                                    let pane_w = preview_panel_width.get();
-                                                    let zoom = preview_zoom.get() as f64 / 100.0;
-                                                    let aspect = ih / iw;
-                                                    let base_w = if fit_page.get() {
-                                                        (pane_w - 56.0).max(160.0)
-                                                    } else {
-                                                        iw
-                                                    };
-                                                    let display_w = (base_w * zoom).max(120.0);
-                                                    let display_h = display_w * aspect;
-                                                    s.width(display_w)
-                                                        .height(display_h)
-                                                        .background(Color::WHITE)
-                                                        .border(1.0)
-                                                        .border_color(theme.border)
-                                                }),
-                                            ))
-                                            .style(move |s| {
-                                                s.items_center().justify_center().gap(2.0)
+                        let preview_body = scroll(
+                            dyn_container(
+                                move || rendered_pages.get().len(),
+                                move |page_count| {
+                                    if page_count > 0 {
+                                        let pages = rendered_pages.get();
+                                        let page_views: Vec<_> = pages
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(idx, page)| {
+                                                let bytes = page.png.clone();
+                                                let iw = page.width as f64;
+                                                let ih = page.height as f64;
+                                                v_stack((
+                                                    label(move || format!("Page {}", idx + 1))
+                                                        .style(move |s| {
+                                                            s.font_size(11.0)
+                                                                .color(theme.text_muted)
+                                                                .padding_vert(4.0)
+                                                                .flex_shrink(0.0)
+                                                        }),
+                                                    img(move || bytes.clone()).style(move |s| {
+                                                        let pane_w = preview_panel_width.get();
+                                                        let zoom =
+                                                            preview_zoom.get() as f64 / 100.0;
+                                                        let aspect = ih / iw;
+                                                        let base_w = if fit_page.get() {
+                                                            (pane_w - 56.0).max(160.0)
+                                                        } else {
+                                                            iw
+                                                        };
+                                                        let display_w =
+                                                            (base_w * zoom).max(120.0);
+                                                        let display_h = display_w * aspect;
+                                                        s.width(display_w)
+                                                            .height(display_h)
+                                                            .flex_shrink(0.0)
+                                                            .background(Color::WHITE)
+                                                            .border(1.0)
+                                                            .border_color(theme.border)
+                                                    }),
+                                                ))
+                                                .style(move |s| {
+                                                    s.items_center().gap(2.0).flex_shrink(0.0)
+                                                })
                                             })
-                                        })
-                                        .collect();
+                                            .collect();
 
-                                    scroll(
-                                        v_stack_from_iter(page_views).style(move |s| {
-                                            s.items_center().padding(20.0).gap(20.0)
-                                        }),
-                                    )
-                                    .style(move |s| {
-                                        s.width_full()
-                                            .min_height(0)
-                                            .flex_basis(0)
-                                            .flex_grow(1.0)
-                                            .background(theme.background)
-                                    })
-                                    .into_any()
-                                } else {
-                                    container(
+                                        v_stack_from_iter(page_views)
+                                            .style(move |s| {
+                                                s.items_center()
+                                                    .padding(20.0)
+                                                    .gap(20.0)
+                                                    .flex_shrink(0.0)
+                                            })
+                                            .into_any()
+                                    } else {
                                         v_stack((
                                             label(|| "PDF".to_string()).style(move |s| {
                                                 s.font_size(28.0)
@@ -1252,22 +1248,22 @@ pub fn app_view() -> impl View {
                                             }),
                                         ))
                                         .style(move |s| {
-                                            s.items_center().justify_center().gap(10.0)
-                                        }),
-                                    )
-                                    .style(move |s| {
-                                        s.width_full()
-                                            .min_height(0)
-                                            .flex_basis(0)
-                                            .flex_grow(1.0)
-                                            .items_center()
-                                            .justify_center()
-                                            .background(theme.background)
-                                    })
-                                    .into_any()
-                                }
-                            },
-                        );
+                                            s.items_center().justify_center().gap(10.0).padding(40.0)
+                                        })
+                                        .into_any()
+                                    }
+                                },
+                            ),
+                        )
+                        .scroll_style(|s| s.shrink_to_fit())
+                        .style(move |s| {
+                            s.width_full()
+                                .height_full()
+                                .min_height(0)
+                                .flex_basis(0)
+                                .flex_grow(1.0)
+                                .background(theme.background)
+                        });
 
                         v_stack((preview_header, preview_body))
                             .style(move |s| {

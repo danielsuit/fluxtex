@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+aldutex = { path = "../../vendor/aldutex" }
 floem = "0.2.0"
 # pdfium-render requires native library, we will mention this in README
 pdfium-render = "0.8"

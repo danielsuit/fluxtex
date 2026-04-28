@@ -1,6 +1,7 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::fs;
 use std::io::ErrorKind;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
@@ -16,7 +17,7 @@ pub enum CompileRequest {
 
 #[derive(Clone)]
 pub enum CompileResult {
-    Ok(Vec<u8>),
+    Ok { pdf: Vec<u8>, engine: String },
     Err(String),
 }
 
@@ -27,14 +28,9 @@ impl CompilerThread {
         thread::spawn(move || {
             for req in rx {
                 match req {
-                    CompileRequest::Compile(source) => match compile_with_tectonic_cli(&source) {
-                        Ok(pdf_data) => {
-                            let _ = result_tx.send(CompileResult::Ok(pdf_data));
-                        }
-                        Err(e) => {
-                            let _ = result_tx.send(CompileResult::Err(e.to_string()));
-                        }
-                    },
+                    CompileRequest::Compile(source) => {
+                        let _ = result_tx.send(compile_pdf(&source));
+                    }
                 }
             }
         });
@@ -44,6 +40,70 @@ impl CompilerThread {
 
     pub fn compile(&self, content: String) {
         let _ = self.tx.send(CompileRequest::Compile(content));
+    }
+}
+
+fn compile_pdf(source: &str) -> CompileResult {
+    match compile_with_aldutex(source) {
+        Ok(pdf) => CompileResult::Ok {
+            pdf,
+            engine: "aldutex".to_string(),
+        },
+        Err(aldutex_err) => match compile_with_tectonic_cli(source) {
+            Ok(pdf) => CompileResult::Ok {
+                pdf,
+                engine: format!(
+                    "tectonic (aldutex fallback)\n\n--- Aldutex declined ---\n{aldutex_err}"
+                ),
+            },
+            Err(tectonic_err) => CompileResult::Err(format!(
+                "Both engines failed.\n\n--- Aldutex ---\n{aldutex_err}\n\n--- Tectonic ---\n{tectonic_err}"
+            )),
+        },
+    }
+}
+
+fn compile_with_aldutex(source: &str) -> Result<Vec<u8>, String> {
+    let result = catch_unwind(AssertUnwindSafe(|| aldutex::compile(source)));
+    match result {
+        Ok((Some(pdf), diagnostics))
+            if !diagnostics.has_errors() && diagnostics.warnings.is_empty() =>
+        {
+            Ok(pdf)
+        }
+        Ok((maybe_pdf, diagnostics)) => {
+            let mut messages: Vec<String> = diagnostics
+                .errors
+                .iter()
+                .map(|e| format!("error: {e}"))
+                .collect();
+            messages.extend(
+                diagnostics
+                    .warnings
+                    .iter()
+                    .map(|w| format!("warning: {w}")),
+            );
+            if maybe_pdf.is_none() && messages.is_empty() {
+                messages.push("aldutex produced no PDF and no diagnostics".to_string());
+            }
+            if maybe_pdf.is_some() && diagnostics.has_errors() == false && !diagnostics.warnings.is_empty() {
+                messages.insert(
+                    0,
+                    "aldutex would silently drop unsupported constructs; falling back to tectonic so the rendered document matches the source.".to_string(),
+                );
+            }
+            Err(messages.join("\n"))
+        }
+        Err(panic_payload) => {
+            let msg = if let Some(s) = panic_payload.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "panic with unknown payload".to_string()
+            };
+            Err(format!("aldutex panicked: {msg}"))
+        }
     }
 }
 

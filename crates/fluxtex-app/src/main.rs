@@ -6,7 +6,9 @@ mod macos_menu;
 mod ui;
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::WARN)
+        .init();
 
     // Spawn tokio runtime
     let rt = tokio::runtime::Runtime::new().unwrap();
