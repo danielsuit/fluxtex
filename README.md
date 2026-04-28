@@ -1,16 +1,14 @@
 # FluXTeX
 
-A native desktop LaTeX editor written in Rust, with two interesting bets in
-its architecture:
+A native desktop LaTeX editor written in Rust, built around two core pieces
+of architecture:
 
 1. **A from-scratch pure-Rust LaTeX engine ([aldutex](https://github.com/danielsuit/aldutex),
-   tracked here as a submodule) with a Tectonic CLI fallback.** The compile
-   pipeline runs aldutex first; if aldutex returns warnings about constructs
-   it would silently drop (`\maketitle`, math operators, environments it
-   doesn't yet implement), the dispatcher falls back to Tectonic so the
-   rendered PDF actually matches the source. As aldutex grows, the fallback
-   fires less often without any code change in this repo. See
-   [`document/compiler.rs`](crates/fluxtex-app/src/document/compiler.rs).
+   tracked here as a submodule).** FluXTeX compiles through aldutex first and
+   is designed to work with aldutex as the primary engine. There is an
+   optional Tectonic CLI fallback for documents that use constructs aldutex
+   still declines so the rendered PDF can stay faithful while the engine
+   matures. See [`document/compiler.rs`](crates/fluxtex-app/src/document/compiler.rs).
 
 2. **Optional collaborative editing on a CRDT + WebRTC stack.** A small
    signaling server ([`fluxtex-signal`](crates/fluxtex-signal)) brokers SDP
@@ -64,9 +62,9 @@ native macOS menu bar.
 |---|---|
 | [`crates/fluxtex-app`](crates/fluxtex-app) | Editor binary: floem UI, compile pipeline, syntax highlighting, PDF preview, collaboration glue, macOS menu bar |
 | [`crates/fluxtex-signal`](crates/fluxtex-signal) | Signaling server (lib for the wire types + bin for the relay) |
-| [`vendor/aldutex`](vendor/aldutex) | Pure-Rust LaTeX engine, as a Git submodule |
+| [`vendor/aldutex`](vendor/aldutex) | Pure-Rust LaTeX engine, as a Git submodule and the primary compiler FluXTeX is built around |
 | [`vendor/pdfium`](vendor/pdfium) | Pdfium headers + license; the `.dylib` is fetched out-of-band (see *Setup* below) |
-| [`vendor/tectonic`](vendor/tectonic) | Empty placeholders; fetch a Tectonic CLI binary in here, or use one on `PATH` |
+| [`vendor/tectonic`](vendor/tectonic) | Optional fallback compiler location; only needed when you want Tectonic available for unsupported aldutex documents |
 
 ## Setup
 
@@ -74,9 +72,11 @@ native macOS menu bar.
 
 - Rust 1.78+
 - macOS (the menu bar code uses `objc2-app-kit`; the rest is portable)
-- `tectonic` CLI somewhere reachable — either install via Homebrew
-  (`brew install tectonic`), or drop a binary at `vendor/tectonic/bin/tectonic`,
-  or set `FLUXTEX_TECTONIC_BIN`.
+- `vendor/aldutex` initialized as a submodule (see below)
+- Optional: `tectonic` CLI somewhere reachable if you want fallback support
+  for LaTeX constructs aldutex does not handle yet. You can install it via
+  Homebrew (`brew install tectonic`), drop a binary at
+  `vendor/tectonic/bin/tectonic`, or set `FLUXTEX_TECTONIC_BIN`.
 
 ### Clone with the submodule
 
@@ -89,6 +89,32 @@ If you've already cloned without `--recurse-submodules`:
 
 ```bash
 git submodule update --init --recursive
+```
+
+### Compiler behavior
+
+FluXTeX compiles with **aldutex first**. If aldutex can render the current
+document without errors or unsupported-construct warnings, no external TeX
+toolchain is needed.
+
+If aldutex declines the document, FluXTeX can optionally fall back to
+Tectonic. That fallback is helpful today for features aldutex is still
+growing into, but it is not the main path the README expects you to start
+from.
+
+### Optional: configure the Tectonic fallback
+
+If you want the fallback available, make sure the Tectonic CLI is installed
+or vendored:
+
+```bash
+brew install tectonic
+```
+
+or place a binary at:
+
+```text
+vendor/tectonic/bin/tectonic
 ```
 
 ### Fetch the pdfium dylib
@@ -169,10 +195,11 @@ cargo clippy -p fluxtex-app -p fluxtex-signal --all-targets --no-deps -- -D warn
 (`--no-deps` skips clippy on the `aldutex` submodule, which has its own lint
 budget I don't try to enforce here.)
 
-## Tectonic lookup order
+## Optional Tectonic fallback lookup order
 
-When the dispatcher falls back to Tectonic, [`document/compiler.rs`](crates/fluxtex-app/src/document/compiler.rs)
-locates the binary and (optional) bundle in this order:
+When aldutex declines a document and the dispatcher falls back to Tectonic,
+[`document/compiler.rs`](crates/fluxtex-app/src/document/compiler.rs)
+locates the binary and optional bundle in this order:
 
 | Resource | Sources, in priority |
 |---|---|
@@ -180,7 +207,7 @@ locates the binary and (optional) bundle in this order:
 | Bundle | `FLUXTEX_TECTONIC_BUNDLE`, `vendor/tectonic/bundles/{default.zip,default.bundle,tectonic-default.bundle}`, `vendor/tectonic/default.bundle` |
 
 If no bundle is configured, Tectonic uses its default network bundle on the
-first compile, then caches it.
+first fallback compile, then caches it.
 
 ## License
 
