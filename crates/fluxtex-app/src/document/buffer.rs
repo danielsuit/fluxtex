@@ -1,19 +1,38 @@
-use cola::{Deletion, Insertion, Replica, ReplicaId};
+use cola::{Deletion, EncodedReplica, Insertion, Replica, ReplicaId};
 
 pub struct DocumentBuffer {
     replica: Replica,
+    replica_id: ReplicaId,
     pub content: String,
 }
 
 impl DocumentBuffer {
-    pub fn new() -> Self {
-        Self::with_replica_id(1)
-    }
-
     pub fn with_replica_id(replica_id: ReplicaId) -> Self {
         Self {
             replica: Replica::new(replica_id, 0),
+            replica_id,
             content: String::new(),
+        }
+    }
+
+    /// Capture an encoded view of the CRDT state. Used by the host on
+    /// connection-open to seed the joining peer's replica so subsequent
+    /// inserts and deletions integrate against a shared baseline.
+    pub fn snapshot(&self) -> EncodedReplica {
+        self.replica.encode()
+    }
+
+    /// Replace local replica + content with the host's snapshot. The local
+    /// replica id is preserved so future ops are still uniquely tagged.
+    pub fn restore_snapshot(&mut self, encoded: &EncodedReplica, content: String) {
+        match Replica::decode(self.replica_id, encoded) {
+            Ok(replica) => {
+                self.replica = replica;
+                self.content = content;
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "CRDT snapshot restore failed");
+            }
         }
     }
 

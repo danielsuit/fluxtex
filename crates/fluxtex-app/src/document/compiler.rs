@@ -77,16 +77,12 @@ fn compile_with_aldutex(source: &str) -> Result<Vec<u8>, String> {
                 .iter()
                 .map(|e| format!("error: {e}"))
                 .collect();
-            messages.extend(
-                diagnostics
-                    .warnings
-                    .iter()
-                    .map(|w| format!("warning: {w}")),
-            );
+            messages.extend(diagnostics.warnings.iter().map(|w| format!("warning: {w}")));
             if maybe_pdf.is_none() && messages.is_empty() {
                 messages.push("aldutex produced no PDF and no diagnostics".to_string());
             }
-            if maybe_pdf.is_some() && diagnostics.has_errors() == false && !diagnostics.warnings.is_empty() {
+            if maybe_pdf.is_some() && !diagnostics.has_errors() && !diagnostics.warnings.is_empty()
+            {
                 messages.insert(
                     0,
                     "aldutex would silently drop unsupported constructs; falling back to tectonic so the rendered document matches the source.".to_string(),

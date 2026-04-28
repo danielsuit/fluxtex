@@ -76,7 +76,7 @@ mod macos {
             let mtm = match MainThreadMarker::new() {
                 Some(m) => m,
                 None => {
-                    eprintln!("install_app_menu: not on main thread; menu skipped");
+                    tracing::warn!("install_app_menu: not on main thread; menu skipped");
                     return;
                 }
             };
@@ -113,12 +113,12 @@ mod macos {
 
     unsafe fn build_menubar(mtm: MainThreadMarker) -> Retained<NSMenu> {
         let cmd = NSEventModifierFlags::NSEventModifierFlagCommand;
-        let cmd_shift =
-            NSEventModifierFlags::NSEventModifierFlagCommand | NSEventModifierFlags::NSEventModifierFlagShift;
-        let cmd_opt =
-            NSEventModifierFlags::NSEventModifierFlagCommand | NSEventModifierFlags::NSEventModifierFlagOption;
-        let cmd_ctrl =
-            NSEventModifierFlags::NSEventModifierFlagCommand | NSEventModifierFlags::NSEventModifierFlagControl;
+        let cmd_shift = NSEventModifierFlags::NSEventModifierFlagCommand
+            | NSEventModifierFlags::NSEventModifierFlagShift;
+        let cmd_opt = NSEventModifierFlags::NSEventModifierFlagCommand
+            | NSEventModifierFlags::NSEventModifierFlagOption;
+        let cmd_ctrl = NSEventModifierFlags::NSEventModifierFlagCommand
+            | NSEventModifierFlags::NSEventModifierFlagControl;
 
         let menubar = NSMenu::new(mtm);
 
@@ -135,13 +135,7 @@ mod macos {
                     None,
                 )),
                 MenuEntry::Separator,
-                MenuEntry::Item(standard(
-                    mtm,
-                    "Services",
-                    None,
-                    "",
-                    None,
-                )),
+                MenuEntry::Item(standard(mtm, "Services", None, "", None)),
                 MenuEntry::Separator,
                 MenuEntry::Item(standard(
                     mtm,
@@ -180,16 +174,40 @@ mod macos {
             mtm,
             "File",
             &[
-                MenuEntry::Item(command(mtm, "New From Starter Template", CMD_NEW_STARTER, "n", Some(cmd))),
+                MenuEntry::Item(command(
+                    mtm,
+                    "New From Starter Template",
+                    CMD_NEW_STARTER,
+                    "n",
+                    Some(cmd),
+                )),
                 MenuEntry::Separator,
                 MenuEntry::Item(command(mtm, "Open…", CMD_OPEN_FILE, "o", Some(cmd))),
-                MenuEntry::Item(command(mtm, "Reload From Disk", CMD_RELOAD_FILE, "r", Some(cmd_shift))),
+                MenuEntry::Item(command(
+                    mtm,
+                    "Reload From Disk",
+                    CMD_RELOAD_FILE,
+                    "r",
+                    Some(cmd_shift),
+                )),
                 MenuEntry::Separator,
                 MenuEntry::Item(command(mtm, "Save", CMD_SAVE_FILE, "s", Some(cmd))),
-                MenuEntry::Item(command(mtm, "Save As…", CMD_SAVE_FILE_AS, "s", Some(cmd_shift))),
+                MenuEntry::Item(command(
+                    mtm,
+                    "Save As…",
+                    CMD_SAVE_FILE_AS,
+                    "s",
+                    Some(cmd_shift),
+                )),
                 MenuEntry::Separator,
                 MenuEntry::Item(command(mtm, "Compile", CMD_COMPILE, "b", Some(cmd))),
-                MenuEntry::Item(command(mtm, "Stop Compile", CMD_STOP_COMPILE, ".", Some(cmd))),
+                MenuEntry::Item(command(
+                    mtm,
+                    "Stop Compile",
+                    CMD_STOP_COMPILE,
+                    ".",
+                    Some(cmd),
+                )),
                 MenuEntry::Separator,
                 MenuEntry::Item(standard(
                     mtm,
@@ -198,13 +216,7 @@ mod macos {
                     "p",
                     Some(cmd_shift),
                 )),
-                MenuEntry::Item(standard(
-                    mtm,
-                    "Print…",
-                    Some(sel!(print:)),
-                    "p",
-                    Some(cmd),
-                )),
+                MenuEntry::Item(standard(mtm, "Print…", Some(sel!(print:)), "p", Some(cmd))),
                 MenuEntry::Separator,
                 MenuEntry::Item(standard(
                     mtm,
@@ -222,7 +234,13 @@ mod macos {
             "Edit",
             &[
                 MenuEntry::Item(standard(mtm, "Undo", Some(sel!(undo:)), "z", Some(cmd))),
-                MenuEntry::Item(standard(mtm, "Redo", Some(sel!(redo:)), "z", Some(cmd_shift))),
+                MenuEntry::Item(standard(
+                    mtm,
+                    "Redo",
+                    Some(sel!(redo:)),
+                    "z",
+                    Some(cmd_shift),
+                )),
                 MenuEntry::Separator,
                 MenuEntry::Item(standard(mtm, "Cut", Some(sel!(cut:)), "x", Some(cmd))),
                 MenuEntry::Item(standard(mtm, "Copy", Some(sel!(copy:)), "c", Some(cmd))),
@@ -368,8 +386,20 @@ mod macos {
                     Some(cmd),
                 )),
                 MenuEntry::Separator,
-                MenuEntry::Item(command(mtm, "Next Theme", CMD_NEXT_THEME, "t", Some(cmd_shift))),
-                MenuEntry::Item(command(mtm, "Previous Theme", CMD_PREV_THEME, "t", Some(cmd_opt))),
+                MenuEntry::Item(command(
+                    mtm,
+                    "Next Theme",
+                    CMD_NEXT_THEME,
+                    "t",
+                    Some(cmd_shift),
+                )),
+                MenuEntry::Item(command(
+                    mtm,
+                    "Previous Theme",
+                    CMD_PREV_THEME,
+                    "t",
+                    Some(cmd_opt),
+                )),
                 MenuEntry::Separator,
                 MenuEntry::Item(command(
                     mtm,
@@ -387,7 +417,13 @@ mod macos {
             "Build",
             &[
                 MenuEntry::Item(command(mtm, "Compile", CMD_COMPILE, "b", Some(cmd))),
-                MenuEntry::Item(command(mtm, "Stop Compile", CMD_STOP_COMPILE, ".", Some(cmd))),
+                MenuEntry::Item(command(
+                    mtm,
+                    "Stop Compile",
+                    CMD_STOP_COMPILE,
+                    ".",
+                    Some(cmd),
+                )),
             ],
         ));
 
@@ -403,13 +439,7 @@ mod macos {
                     "m",
                     Some(cmd),
                 )),
-                MenuEntry::Item(standard(
-                    mtm,
-                    "Zoom",
-                    Some(sel!(performZoom:)),
-                    "",
-                    None,
-                )),
+                MenuEntry::Item(standard(mtm, "Zoom", Some(sel!(performZoom:)), "", None)),
                 MenuEntry::Separator,
                 MenuEntry::Item(standard(
                     mtm,
@@ -439,7 +469,13 @@ mod macos {
                     Some(cmd),
                 )),
                 MenuEntry::Separator,
-                MenuEntry::Item(command(mtm, "FluXTeX Documentation", CMD_OPEN_DOCS, "", None)),
+                MenuEntry::Item(command(
+                    mtm,
+                    "FluXTeX Documentation",
+                    CMD_OPEN_DOCS,
+                    "",
+                    None,
+                )),
                 MenuEntry::Item(command(mtm, "GitHub Repository", CMD_OPEN_REPO, "", None)),
                 MenuEntry::Item(command(mtm, "Report an Issue", CMD_REPORT_ISSUE, "", None)),
             ],
@@ -568,7 +604,13 @@ mod macos {
         key: &str,
         modifiers: Option<NSEventModifierFlags>,
     ) -> Retained<NSMenuItem> {
-        let item = standard(mtm, title, Some(sel!(handleFluxTexMenuItem:)), key, modifiers);
+        let item = standard(
+            mtm,
+            title,
+            Some(sel!(handleFluxTexMenuItem:)),
+            key,
+            modifiers,
+        );
         item.setTarget(Some(menu_target()));
         item.setTag(tag);
         item

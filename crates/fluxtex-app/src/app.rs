@@ -1,8 +1,10 @@
+use crate::collab::{CollabEvent, CollabStatus, CollaborationSession};
 use crate::document::buffer::DocumentBuffer;
 use crate::document::compiler::{CompileResult, CompilerThread};
 use crate::document::pdf_render::{render_pdf_to_png, RenderedPage};
 use crate::highlight::{latex_styling, EditorHandle, LatexThemeColors};
 use crate::macos_menu::{install_app_menu, AppMenuCommand};
+use crate::CollabConfig;
 use crossbeam_channel::{unbounded, RecvTimeoutError, Sender};
 use floem::event::{Event, EventListener};
 use floem::peniko::Color;
@@ -10,6 +12,8 @@ use floem::prelude::*;
 use floem::reactive::{create_effect, create_rw_signal, SignalGet, SignalUpdate};
 use floem::style::{AlignItems, CursorStyle};
 use floem::text::Weight;
+use floem::views::editor::core::editor::EditType;
+use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::RenderWhitespace;
 use floem::views::text_editor::text_editor;
 use floem::views::v_stack_from_iter;
@@ -214,11 +218,7 @@ fn palette(preset: ThemePreset) -> Theme {
     }
 }
 
-fn primary_button(
-    title: &'static str,
-    on_click: impl Fn(()) + 'static,
-    theme: Theme,
-) -> impl View {
+fn primary_button(title: &'static str, on_click: impl Fn(()) + 'static, theme: Theme) -> impl View {
     button(label(move || title.to_string()))
         .on_click_stop(move |_| on_click(()))
         .style(move |s| {
@@ -235,11 +235,7 @@ fn primary_button(
         })
 }
 
-fn ghost_button(
-    title: &'static str,
-    on_click: impl Fn(()) + 'static,
-    theme: Theme,
-) -> impl View {
+fn ghost_button(title: &'static str, on_click: impl Fn(()) + 'static, theme: Theme) -> impl View {
     button(label(move || title.to_string()))
         .on_click_stop(move |_| on_click(()))
         .style(move |s| {
@@ -259,11 +255,7 @@ fn ghost_button(
         })
 }
 
-fn icon_button(
-    glyph: &'static str,
-    on_click: impl Fn(()) + 'static,
-    theme: Theme,
-) -> impl View {
+fn icon_button(glyph: &'static str, on_click: impl Fn(()) + 'static, theme: Theme) -> impl View {
     button(label(move || glyph.to_string()))
         .on_click_stop(move |_| on_click(()))
         .style(move |s| {
@@ -310,7 +302,11 @@ fn toggle_button(
                 } else {
                     Color::TRANSPARENT
                 })
-                .color(if is_active { theme.text } else { theme.text_muted })
+                .color(if is_active {
+                    theme.text
+                } else {
+                    theme.text_muted
+                })
                 .font_size(12.0)
                 .hover(|s| s.border_color(theme.border_strong))
         })
@@ -351,6 +347,196 @@ fn section_header(
 
 fn clamp_width(value: f64, min_width: f64, max_width: f64) -> f64 {
     value.max(min_width).min(max_width)
+}
+
+fn status_label(status: &CollabStatus) -> &'static str {
+    match status {
+        CollabStatus::Idle => "Solo",
+        CollabStatus::ConnectingToSignaling => "Connecting…",
+        CollabStatus::WaitingForPeer => "Waiting for peer",
+        CollabStatus::Joining => "Joining room…",
+        CollabStatus::Negotiating => "Negotiating…",
+        CollabStatus::Connected => "Connected",
+        CollabStatus::Disconnected(_) => "Disconnected",
+    }
+}
+
+fn status_color(theme: Theme, status: &CollabStatus) -> Color {
+    match status {
+        CollabStatus::Connected => theme.success,
+        CollabStatus::WaitingForPeer | CollabStatus::Joining | CollabStatus::Negotiating => {
+            theme.warning
+        }
+        CollabStatus::ConnectingToSignaling => theme.accent,
+        CollabStatus::Disconnected(_) => theme.error,
+        CollabStatus::Idle => theme.text_muted,
+    }
+}
+
+fn collab_session_widget(
+    theme: Theme,
+    status_signal: floem::reactive::RwSignal<CollabStatus>,
+    code_signal: floem::reactive::RwSignal<String>,
+    join_input: floem::reactive::RwSignal<String>,
+    collab_state: Arc<Mutex<Option<CollaborationSession>>>,
+    signaling_addr_signal: floem::reactive::RwSignal<String>,
+    log: floem::reactive::RwSignal<String>,
+) -> impl View {
+    use floem::views::text_input;
+
+    dyn_container(
+        move || status_signal.get(),
+        move |status| {
+            let collab_state = collab_state.clone();
+            let is_idle = matches!(status, CollabStatus::Idle | CollabStatus::Disconnected(_));
+
+            if is_idle {
+                let collab_for_host = collab_state.clone();
+                let host_btn = button(label(|| "Host".to_string()))
+                    .on_click_stop(move |_| {
+                        let mut lock = collab_for_host.lock().unwrap();
+                        if lock.is_some() {
+                            return;
+                        }
+                        let addr = signaling_addr_signal.get();
+                        match CollaborationSession::host(addr) {
+                            Ok(session) => {
+                                *lock = Some(session);
+                                status_signal.set(CollabStatus::ConnectingToSignaling);
+                            }
+                            Err(e) => {
+                                log.update(|l| l.push_str(&format!("host failed: {e}\n")));
+                            }
+                        }
+                    })
+                    .style(move |s| {
+                        s.padding_horiz(12.0)
+                            .padding_vert(6.0)
+                            .border(0.0)
+                            .border_radius(6.0)
+                            .background(theme.accent)
+                            .color(Color::WHITE)
+                            .font_size(12.0)
+                            .font_weight(Weight::SEMIBOLD)
+                            .hover(|s| s.background(theme.accent.multiply_alpha(0.88)))
+                    });
+
+                let collab_for_join = collab_state.clone();
+                let join_btn = button(label(|| "Join".to_string()))
+                    .on_click_stop(move |_| {
+                        let mut lock = collab_for_join.lock().unwrap();
+                        if lock.is_some() {
+                            return;
+                        }
+                        let addr = signaling_addr_signal.get();
+                        let code = join_input.get().trim().to_uppercase();
+                        if code.is_empty() {
+                            log.update(|l| l.push_str("enter a room code first\n"));
+                            return;
+                        }
+                        match CollaborationSession::join(addr, code) {
+                            Ok(session) => {
+                                *lock = Some(session);
+                                status_signal.set(CollabStatus::ConnectingToSignaling);
+                            }
+                            Err(e) => {
+                                log.update(|l| l.push_str(&format!("join failed: {e}\n")));
+                            }
+                        }
+                    })
+                    .style(move |s| {
+                        s.padding_horiz(10.0)
+                            .padding_vert(6.0)
+                            .border(1.0)
+                            .border_radius(6.0)
+                            .border_color(theme.border)
+                            .background(Color::TRANSPARENT)
+                            .color(theme.text)
+                            .font_size(12.0)
+                            .hover(|s| {
+                                s.background(theme.panel_alt)
+                                    .border_color(theme.border_strong)
+                            })
+                    });
+
+                let code_field = text_input(join_input)
+                    .placeholder("Room code")
+                    .style(move |s| {
+                        s.width(110.0)
+                            .padding_horiz(8.0)
+                            .padding_vert(5.0)
+                            .border(1.0)
+                            .border_radius(6.0)
+                            .border_color(theme.border)
+                            .background(theme.panel_alt)
+                            .color(theme.text)
+                            .font_size(12.0)
+                    });
+
+                h_stack((host_btn, code_field, join_btn))
+                    .style(move |s| s.gap(6.0).items_center())
+                    .into_any()
+            } else {
+                let collab_for_leave = collab_state.clone();
+                let label_text = status_label(&status).to_string();
+                let pill_color = status_color(theme, &status);
+
+                let leave_btn = button(label(|| "Leave".to_string()))
+                    .on_click_stop(move |_| {
+                        let mut lock = collab_for_leave.lock().unwrap();
+                        if let Some(mut session) = lock.take() {
+                            session.shutdown();
+                        }
+                        status_signal.set(CollabStatus::Idle);
+                        code_signal.set(String::new());
+                    })
+                    .style(move |s| {
+                        s.padding_horiz(10.0)
+                            .padding_vert(6.0)
+                            .border(1.0)
+                            .border_radius(6.0)
+                            .border_color(theme.border)
+                            .background(Color::TRANSPARENT)
+                            .color(theme.text)
+                            .font_size(12.0)
+                            .hover(|s| {
+                                s.background(theme.panel_alt)
+                                    .border_color(theme.border_strong)
+                            })
+                    });
+
+                h_stack((
+                    container(empty()).style(move |s| {
+                        s.width(7.0)
+                            .height(7.0)
+                            .border_radius(999.0)
+                            .background(pill_color)
+                    }),
+                    label(move || label_text.clone()).style(move |s| {
+                        s.font_size(12.0)
+                            .font_weight(Weight::SEMIBOLD)
+                            .color(theme.text)
+                    }),
+                    label(move || {
+                        let code = code_signal.get();
+                        if code.is_empty() {
+                            String::new()
+                        } else {
+                            format!("· {code}")
+                        }
+                    })
+                    .style(move |s| {
+                        s.font_size(12.0)
+                            .color(theme.accent)
+                            .font_weight(Weight::SEMIBOLD)
+                    }),
+                    leave_btn,
+                ))
+                .style(move |s| s.gap(8.0).items_center())
+                .into_any()
+            }
+        },
+    )
 }
 
 fn clamp_height(value: f64, min_height: f64, max_height: f64) -> f64 {
@@ -516,14 +702,18 @@ fn build_status_color(theme: Theme, status: &str) -> Color {
     }
 }
 
-fn initial_editor_content() -> String {
-    std::fs::read_to_string(AUTOSAVE_PATH)
+fn initial_editor_content(path: &str) -> String {
+    std::fs::read_to_string(path)
         .ok()
         .filter(|content| !content.trim().is_empty())
         .unwrap_or_else(|| STARTER_LATEX.to_string())
 }
 
-fn spawn_autosave_worker(result_tx: Sender<AutosaveResult>) -> Sender<String> {
+fn spawn_autosave_worker(
+    autosave_path: String,
+    last_written: Arc<Mutex<String>>,
+    result_tx: Sender<AutosaveResult>,
+) -> Sender<String> {
     let (tx, rx) = unbounded::<String>();
 
     std::thread::spawn(move || {
@@ -536,8 +726,16 @@ fn spawn_autosave_worker(result_tx: Sender<AutosaveResult>) -> Sender<String> {
                 }
             }
 
-            let result = match std::fs::write(AUTOSAVE_PATH, &latest_content) {
-                Ok(()) => AutosaveResult::Saved,
+            if let Some(parent) = std::path::Path::new(&autosave_path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+            }
+            let result = match std::fs::write(&autosave_path, &latest_content) {
+                Ok(()) => {
+                    *last_written.lock().unwrap() = latest_content.clone();
+                    AutosaveResult::Saved
+                }
                 Err(err) => AutosaveResult::Failed(err.to_string()),
             };
             let _ = result_tx.send(result);
@@ -547,11 +745,58 @@ fn spawn_autosave_worker(result_tx: Sender<AutosaveResult>) -> Sender<String> {
     tx
 }
 
-pub fn app_view() -> impl View {
+/// Polls the autosave file and emits the new content whenever it changes
+/// from disk in a way that didn't originate locally. This is the primary
+/// peer-to-peer sync mechanism: both app instances point at the same file,
+/// each one's autosave write becomes the other one's external change.
+fn spawn_file_watcher(
+    autosave_path: String,
+    last_written: Arc<Mutex<String>>,
+) -> crossbeam_channel::Receiver<String> {
+    let (tx, rx) = unbounded::<String>();
+    std::thread::spawn(move || {
+        let mut last_seen: Option<String> = None;
+        loop {
+            std::thread::sleep(Duration::from_millis(150));
+            let Ok(current) = std::fs::read_to_string(&autosave_path) else {
+                continue;
+            };
+            let already_local = {
+                let lw = last_written.lock().unwrap();
+                *lw == current
+            };
+            if already_local {
+                last_seen = Some(current);
+                continue;
+            }
+            if last_seen.as_deref() == Some(current.as_str()) {
+                continue;
+            }
+            last_seen = Some(current.clone());
+            if tx.send(current).is_err() {
+                break;
+            }
+        }
+    });
+    rx
+}
+
+pub fn app_view(config: CollabConfig) -> impl View {
     let replica_id = ((Uuid::new_v4().as_u128() as u64) | 1).max(1);
     let doc_buffer = Arc::new(Mutex::new(DocumentBuffer::with_replica_id(replica_id)));
-    let initial_content = initial_editor_content();
+    let initial_content = initial_editor_content(&config.autosave_path);
     let content_signal = create_rw_signal(initial_content.clone());
+    let autosave_path = config.autosave_path.clone();
+    let autosave_path_for_status = config.autosave_path.clone();
+    let signaling_addr = config.signaling_addr.clone();
+    let signaling_addr_init = signaling_addr.clone();
+    let instance_label = config.instance_label.clone();
+    let collab_state: Arc<Mutex<Option<CollaborationSession>>> = Arc::new(Mutex::new(None));
+    let collab_status = create_rw_signal(CollabStatus::Idle);
+    let collab_room_code = create_rw_signal(String::new());
+    let collab_join_input = create_rw_signal(String::new());
+    let collab_log = create_rw_signal(String::new());
+    let signaling_addr_signal = create_rw_signal(signaling_addr_init);
     let theme_preset = create_rw_signal(ThemePreset::Midnight);
     let show_file_tree = create_rw_signal(true);
     let show_preview = create_rw_signal(true);
@@ -565,40 +810,175 @@ pub fn app_view() -> impl View {
     let pdf_status = create_rw_signal("Ready".to_string());
     let rendered_pages = create_rw_signal(Vec::<Rc<RenderedPage>>::new());
     let editor_handle: EditorHandle = Rc::new(RefCell::new(None));
-    let autosave_status = create_rw_signal(format!("Autosave on · {AUTOSAVE_PATH}"));
+    let autosave_status = create_rw_signal(format!("Autosave on · {autosave_path_for_status}"));
     let autosave_ok = create_rw_signal(true);
 
     let previous_text = Rc::new(RefCell::new(String::new()));
     let doc_buffer_clone = doc_buffer.clone();
+    let last_written = Arc::new(Mutex::new(initial_content.clone()));
     let (autosave_result_tx, autosave_result_rx) = unbounded::<AutosaveResult>();
-    let autosave_tx = spawn_autosave_worker(autosave_result_tx);
+    let autosave_tx = spawn_autosave_worker(
+        autosave_path.clone(),
+        last_written.clone(),
+        autosave_result_tx,
+    );
     let autosave_results = floem::ext_event::create_signal_from_channel(autosave_result_rx);
     let _ = autosave_tx.send(initial_content);
 
+    // File-based peer sync: any change to the autosave file that didn't
+    // originate locally gets pushed into the editor as an external update.
+    let file_watcher_rx = spawn_file_watcher(autosave_path.clone(), last_written.clone());
+    let file_watcher_signal = floem::ext_event::create_signal_from_channel(file_watcher_rx);
+    let editor_handle_for_watcher = editor_handle.clone();
+    let previous_text_for_watcher = previous_text.clone();
+    create_effect(move |_| {
+        let Some(new_content) = file_watcher_signal.get() else {
+            return;
+        };
+        // Update the suppression marker BEFORE touching the editor so the
+        // resulting on_update callback's content_signal.set() produces a
+        // zero diff in the broadcast effect — i.e. we don't echo the
+        // external change back to the file.
+        *previous_text_for_watcher.borrow_mut() = new_content.clone();
+        content_signal.set(new_content.clone());
+        let editor_ref = editor_handle_for_watcher.borrow();
+        if let Some(editor) = editor_ref.as_ref() {
+            let doc = editor.doc();
+            let total_len = doc.text().len();
+            let selection = Selection::region(0, total_len);
+            doc.edit(
+                &mut std::iter::once((selection, new_content.as_str())),
+                EditType::Other,
+            );
+        }
+    });
+
     let content_tracker_sig = content_signal;
+    let collab_state_for_diff = collab_state.clone();
+    let previous_text_diff = previous_text.clone();
     create_effect(move |_| {
         let new_text = content_tracker_sig.get();
-        let mut prev = previous_text.borrow_mut();
+        let mut prev = previous_text_diff.borrow_mut();
         if new_text != *prev {
             let mut db = doc_buffer_clone.lock().unwrap();
-            let _messages =
-                crate::document::buffer_diff::apply_text_diff(&mut db, &prev, &new_text);
+            let mut collab_lock = collab_state_for_diff.lock().unwrap();
+            if let Some(session) = collab_lock.as_mut() {
+                let _ = session.broadcast_local_edit(&mut db, &prev, &new_text);
+            } else {
+                let _ = crate::document::buffer_diff::apply_text_diff(&mut db, &prev, &new_text);
+            }
+            drop(collab_lock);
+            drop(db);
             *prev = new_text.clone();
             let _ = autosave_tx.send(new_text);
         }
     });
 
+    let autosave_path_for_effect = autosave_path_for_status.clone();
     create_effect(move |_| {
         if let Some(result) = autosave_results.get() {
             match result {
                 AutosaveResult::Saved => {
                     autosave_ok.set(true);
-                    autosave_status.set(format!("Autosaved · {AUTOSAVE_PATH}"));
+                    autosave_status.set(format!("Autosaved · {autosave_path_for_effect}"));
                 }
                 AutosaveResult::Failed(err) => {
                     autosave_ok.set(false);
                     autosave_status.set(format!("Autosave failed · {err}"));
                 }
+            }
+        }
+    });
+
+    // Collab tick + drain. A small thread fires a tick every 50ms; the effect
+    // below drains pending events whenever a tick arrives, applies remote sync
+    // messages to the local buffer, and pushes the resulting content into the
+    // editor without re-broadcasting.
+    let (collab_tick_tx, collab_tick_rx) = unbounded::<()>();
+    let collab_tick_signal = floem::ext_event::create_signal_from_channel(collab_tick_rx);
+    std::thread::spawn(move || loop {
+        if collab_tick_tx.send(()).is_err() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    });
+
+    let collab_state_drain = collab_state.clone();
+    let doc_buffer_drain = doc_buffer.clone();
+    let editor_handle_drain = editor_handle.clone();
+    let previous_text_drain = previous_text.clone();
+    create_effect(move |_| {
+        if collab_tick_signal.get().is_none() {
+            return;
+        }
+        let mut state_lock = collab_state_drain.lock().unwrap();
+        let Some(session) = state_lock.as_mut() else {
+            return;
+        };
+        let mut buffer_lock = doc_buffer_drain.lock().unwrap();
+        let events = session.drain(&mut buffer_lock);
+        let updated_content = buffer_lock.content.clone();
+        drop(buffer_lock);
+        drop(state_lock);
+
+        let mut remote_applied = false;
+        let mut log_entries: Vec<String> = Vec::new();
+
+        for ev in events {
+            match ev {
+                CollabEvent::StatusChanged(status) => {
+                    log_entries.push(format!("status: {status:?}"));
+                    collab_status.set(status);
+                }
+                CollabEvent::RoomCode(code) => {
+                    log_entries.push(format!("room created: {code}"));
+                    collab_room_code.set(code);
+                }
+                CollabEvent::PeerJoined => {
+                    log_entries.push("peer joined".to_string());
+                }
+                CollabEvent::PeerLeft => {
+                    log_entries.push("peer left".to_string());
+                    collab_room_code.set(String::new());
+                }
+                CollabEvent::RemoteSyncApplied => {
+                    remote_applied = true;
+                }
+                CollabEvent::Info(msg) => {
+                    log_entries.push(msg);
+                }
+                CollabEvent::Error(msg) => {
+                    log_entries.push(format!("error: {msg}"));
+                }
+            }
+        }
+
+        if !log_entries.is_empty() {
+            collab_log.update(|log| {
+                for entry in log_entries {
+                    log.push_str(&entry);
+                    log.push('\n');
+                }
+            });
+        }
+
+        if remote_applied {
+            // Suppress the local-broadcast effect: by setting previous_text to
+            // the post-remote content first, the upcoming reactive
+            // content_signal.set(...) sees zero diff and therefore does not
+            // re-broadcast.
+            *previous_text_drain.borrow_mut() = updated_content.clone();
+            content_signal.set(updated_content.clone());
+
+            let editor_ref = editor_handle_drain.borrow();
+            if let Some(editor) = editor_ref.as_ref() {
+                let doc = editor.doc();
+                let total_len = doc.text().len();
+                let selection = Selection::region(0, total_len);
+                doc.edit(
+                    &mut std::iter::once((selection, updated_content.as_str())),
+                    EditType::Other,
+                );
             }
         }
     });
@@ -613,8 +993,6 @@ pub fn app_view() -> impl View {
     let trigger_compile: Rc<dyn Fn()> = {
         let compiler = compiler.clone();
         let content_for_compile = content_signal;
-        let pdf_status = pdf_status;
-        let compile_log = compile_log;
         Rc::new(move || {
             let current = content_for_compile.get();
             pdf_status.set("Compiling...".to_string());
@@ -638,8 +1016,7 @@ pub fn app_view() -> impl View {
                         Ok(pages) => {
                             let page_count = pages.len();
                             let pdf_len = pdf.len();
-                            rendered_pages
-                                .set(pages.into_iter().map(Rc::new).collect());
+                            rendered_pages.set(pages.into_iter().map(Rc::new).collect());
                             compile_log.set(format!(
                                 "Build finished successfully.\n\nEngine: {engine}\nOutput size: {pdf_len} bytes\nPages rendered: {page_count}\nStatus: PDF rendered and ready for preview."
                             ));
@@ -704,19 +1081,16 @@ pub fn app_view() -> impl View {
                             .to_string(),
                     );
                 }
-                AppMenuCommand::ReloadFile => {
-                    match std::fs::read_to_string(AUTOSAVE_PATH) {
-                        Ok(content) => {
-                            content_signal.set(content);
-                            autosave_status
-                                .set(format!("Reloaded · {AUTOSAVE_PATH}"));
-                        }
-                        Err(err) => {
-                            problems_expanded.set(true);
-                            compile_log.set(format!("Reload failed.\n\n{err}"));
-                        }
+                AppMenuCommand::ReloadFile => match std::fs::read_to_string(AUTOSAVE_PATH) {
+                    Ok(content) => {
+                        content_signal.set(content);
+                        autosave_status.set(format!("Reloaded · {AUTOSAVE_PATH}"));
                     }
-                }
+                    Err(err) => {
+                        problems_expanded.set(true);
+                        compile_log.set(format!("Reload failed.\n\n{err}"));
+                    }
+                },
                 AppMenuCommand::Compile => trigger_compile_for_menu(),
                 AppMenuCommand::StopCompile => {
                     pdf_status.set("Idle".to_string());
@@ -789,6 +1163,18 @@ pub fn app_view() -> impl View {
             let toolbar_compile_action = trigger_compile.clone();
 
             // ── Toolbar ────────────────────────────────────────────────
+            let autosave_path_for_label = autosave_path_for_status.clone();
+            let instance_label_for_label = instance_label.clone();
+            let session_widget = collab_session_widget(
+                theme,
+                collab_status,
+                collab_room_code,
+                collab_join_input,
+                collab_state.clone(),
+                signaling_addr_signal,
+                collab_log,
+            );
+
             let toolbar = h_stack((
                 h_stack((
                     label(|| "FluXTeX".to_string()).style(move |s| {
@@ -802,11 +1188,14 @@ pub fn app_view() -> impl View {
                             .background(theme.border_strong)
                             .margin_horiz(6.0)
                     }),
-                    label(|| AUTOSAVE_PATH.to_string()).style(move |s| {
-                        s.font_size(12.5).color(theme.text_muted)
+                    label(move || autosave_path_for_label.clone())
+                        .style(move |s| s.font_size(12.5).color(theme.text_muted)),
+                    label(move || format!("[{}]", instance_label_for_label)).style(move |s| {
+                        s.font_size(11.0).color(theme.text_muted).padding_horiz(6.0)
                     }),
                 ))
                 .style(move |s| s.gap(6.0).items_center()),
+                session_widget,
                 h_stack((
                     toggle_button(
                         "Sidebar",
@@ -827,9 +1216,7 @@ pub fn app_view() -> impl View {
                             .margin_horiz(2.0)
                     }),
                     button(label(move || format!("Theme: {}", theme.name)))
-                        .on_click_stop(move |_| {
-                            theme_preset.update(|value| *value = value.next())
-                        })
+                        .on_click_stop(move |_| theme_preset.update(|value| *value = value.next()))
                         .style(move |s| {
                             s.padding_horiz(10.0)
                                 .padding_vert(6.0)
@@ -871,11 +1258,7 @@ pub fn app_view() -> impl View {
                 move |visible| {
                     if visible {
                         v_stack((
-                            section_header(
-                                "PROJECT",
-                                move || String::new(),
-                                theme,
-                            ),
+                            section_header("PROJECT", String::new, theme),
                             label(move || extract_project_tree(&content_for_tree.get())).style(
                                 move |s| {
                                     s.width_full()
@@ -921,10 +1304,7 @@ pub fn app_view() -> impl View {
                                 }),
                             )
                             .style(move |s| {
-                                s.width_full()
-                                    .min_height(0)
-                                    .flex_basis(0)
-                                    .flex_grow(1.0)
+                                s.width_full().min_height(0).flex_basis(0).flex_grow(1.0)
                             }),
                         ))
                         .style(move |s| {
@@ -973,14 +1353,13 @@ pub fn app_view() -> impl View {
             let editor_tab_bar = h_stack((
                 h_stack((
                     container(empty()).style(move |s| {
-                        s.width(7.0)
-                            .height(7.0)
-                            .border_radius(999.0)
-                            .background(if autosave_ok.get() {
+                        s.width(7.0).height(7.0).border_radius(999.0).background(
+                            if autosave_ok.get() {
                                 theme.success
                             } else {
                                 theme.warning
-                            })
+                            },
+                        )
                     }),
                     label(|| "main.tex".to_string()).style(move |s| {
                         s.font_size(13.0)
@@ -1027,6 +1406,12 @@ pub fn app_view() -> impl View {
                             delimiter: theme.syntax_delimiter,
                         },
                     ))
+                    .with_editor({
+                        let editor_handle = editor_handle.clone();
+                        move |editor| {
+                            *editor_handle.borrow_mut() = Some(editor.clone());
+                        }
+                    })
                     .update({
                         let editor_handle = editor_handle.clone();
                         move |update| {
@@ -1122,14 +1507,12 @@ pub fn app_view() -> impl View {
                                     },
                                     theme,
                                 ),
-                                label(move || format!("{}%", preview_zoom.get())).style(
-                                    move |s| {
-                                        s.min_width(36.0)
-                                            .font_size(11.5)
-                                            .color(theme.text_muted)
-                                            .justify_center()
-                                    },
-                                ),
+                                label(move || format!("{}%", preview_zoom.get())).style(move |s| {
+                                    s.min_width(36.0)
+                                        .font_size(11.5)
+                                        .color(theme.text_muted)
+                                        .justify_center()
+                                }),
                                 icon_button(
                                     "+",
                                     move |_| {
@@ -1164,97 +1547,90 @@ pub fn app_view() -> impl View {
                                 .border_color(theme.border)
                         });
 
-                        let preview_body = scroll(
-                            dyn_container(
-                                move || rendered_pages.get().len(),
-                                move |page_count| {
-                                    if page_count > 0 {
-                                        let pages = rendered_pages.get();
-                                        let page_views: Vec<_> = pages
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(idx, page)| {
-                                                let bytes = page.png.clone();
-                                                let iw = page.width as f64;
-                                                let ih = page.height as f64;
-                                                v_stack((
-                                                    label(move || format!("Page {}", idx + 1))
-                                                        .style(move |s| {
-                                                            s.font_size(11.0)
-                                                                .color(theme.text_muted)
-                                                                .padding_vert(4.0)
-                                                                .flex_shrink(0.0)
-                                                        }),
-                                                    img(move || bytes.clone()).style(move |s| {
-                                                        let pane_w = preview_panel_width.get();
-                                                        let zoom =
-                                                            preview_zoom.get() as f64 / 100.0;
-                                                        let aspect = ih / iw;
-                                                        let base_w = if fit_page.get() {
-                                                            (pane_w - 56.0).max(160.0)
-                                                        } else {
-                                                            iw
-                                                        };
-                                                        let display_w =
-                                                            (base_w * zoom).max(120.0);
-                                                        let display_h = display_w * aspect;
-                                                        s.width(display_w)
-                                                            .height(display_h)
+                        let preview_body = scroll(dyn_container(
+                            move || rendered_pages.get().len(),
+                            move |page_count| {
+                                if page_count > 0 {
+                                    let pages = rendered_pages.get();
+                                    let page_views: Vec<_> = pages
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(idx, page)| {
+                                            let bytes = page.png.clone();
+                                            let iw = page.width as f64;
+                                            let ih = page.height as f64;
+                                            v_stack((
+                                                label(move || format!("Page {}", idx + 1)).style(
+                                                    move |s| {
+                                                        s.font_size(11.0)
+                                                            .color(theme.text_muted)
+                                                            .padding_vert(4.0)
                                                             .flex_shrink(0.0)
-                                                            .background(Color::WHITE)
-                                                            .border(1.0)
-                                                            .border_color(theme.border)
-                                                    }),
-                                                ))
-                                                .style(move |s| {
-                                                    s.items_center().gap(2.0).flex_shrink(0.0)
-                                                })
-                                            })
-                                            .collect();
+                                                    },
+                                                ),
+                                                img(move || bytes.clone()).style(move |s| {
+                                                    let pane_w = preview_panel_width.get();
+                                                    let zoom = preview_zoom.get() as f64 / 100.0;
+                                                    let aspect = ih / iw;
+                                                    let base_w = if fit_page.get() {
+                                                        (pane_w - 56.0).max(160.0)
+                                                    } else {
+                                                        iw
+                                                    };
+                                                    let display_w = (base_w * zoom).max(120.0);
+                                                    let display_h = display_w * aspect;
+                                                    s.width(display_w)
+                                                        .height(display_h)
+                                                        .flex_shrink(0.0)
+                                                        .background(Color::WHITE)
+                                                        .border(1.0)
+                                                        .border_color(theme.border)
+                                                }),
+                                            ))
+                                            .style(
+                                                move |s| s.items_center().gap(2.0).flex_shrink(0.0),
+                                            )
+                                        })
+                                        .collect();
 
-                                        v_stack_from_iter(page_views)
-                                            .style(move |s| {
-                                                s.items_center()
-                                                    .padding(20.0)
-                                                    .gap(20.0)
-                                                    .flex_shrink(0.0)
-                                            })
-                                            .into_any()
-                                    } else {
-                                        v_stack((
-                                            label(|| "PDF".to_string()).style(move |s| {
-                                                s.font_size(28.0)
-                                                    .font_weight(Weight::BOLD)
-                                                    .color(theme.text_muted)
-                                                    .padding_horiz(14.0)
-                                                    .padding_vert(8.0)
-                                                    .border(1.0)
-                                                    .border_radius(8.0)
-                                                    .border_color(theme.border)
-                                            }),
-                                            label(|| "No preview yet".to_string()).style(
-                                                move |s| {
-                                                    s.font_size(14.0)
-                                                        .font_weight(Weight::SEMIBOLD)
-                                                        .color(theme.text)
-                                                },
-                                            ),
-                                            label(move || {
-                                                preview_placeholder_message(&pdf_status.get())
-                                                    .to_string()
-                                            })
-                                            .style(move |s| {
-                                                s.font_size(12.0).color(theme.text_muted)
-                                            }),
-                                        ))
+                                    v_stack_from_iter(page_views)
                                         .style(move |s| {
-                                            s.items_center().justify_center().gap(10.0).padding(40.0)
+                                            s.items_center()
+                                                .padding(20.0)
+                                                .gap(20.0)
+                                                .flex_shrink(0.0)
                                         })
                                         .into_any()
-                                    }
-                                },
-                            ),
-                        )
+                                } else {
+                                    v_stack((
+                                        label(|| "PDF".to_string()).style(move |s| {
+                                            s.font_size(28.0)
+                                                .font_weight(Weight::BOLD)
+                                                .color(theme.text_muted)
+                                                .padding_horiz(14.0)
+                                                .padding_vert(8.0)
+                                                .border(1.0)
+                                                .border_radius(8.0)
+                                                .border_color(theme.border)
+                                        }),
+                                        label(|| "No preview yet".to_string()).style(move |s| {
+                                            s.font_size(14.0)
+                                                .font_weight(Weight::SEMIBOLD)
+                                                .color(theme.text)
+                                        }),
+                                        label(move || {
+                                            preview_placeholder_message(&pdf_status.get())
+                                                .to_string()
+                                        })
+                                        .style(move |s| s.font_size(12.0).color(theme.text_muted)),
+                                    ))
+                                    .style(move |s| {
+                                        s.items_center().justify_center().gap(10.0).padding(40.0)
+                                    })
+                                    .into_any()
+                                }
+                            },
+                        ))
                         .scroll_style(|s| s.shrink_to_fit())
                         .style(move |s| {
                             s.width_full()

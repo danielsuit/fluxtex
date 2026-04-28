@@ -9,8 +9,8 @@ use crate::document::network::{decode_sync_message, encode_sync_message, SyncMes
 
 #[derive(Debug)]
 pub enum SignalingEvent {
-    LocalDescription(SessionDescription),
-    IceCandidate(IceCandidate),
+    LocalDescription(Box<SessionDescription>),
+    IceCandidate(Box<IceCandidate>),
     ConnectionState(ConnectionState),
     DataChannelOpen,
     DataChannelClosed,
@@ -41,14 +41,16 @@ impl datachannel::PeerConnectionHandler for MyPcHandler {
         let _ = self
             .event_tx
             .send(WebRtcEvent::Signaling(SignalingEvent::LocalDescription(
-                sess_desc,
+                Box::new(sess_desc),
             )));
     }
 
     fn on_candidate(&mut self, cand: IceCandidate) {
         let _ = self
             .event_tx
-            .send(WebRtcEvent::Signaling(SignalingEvent::IceCandidate(cand)));
+            .send(WebRtcEvent::Signaling(SignalingEvent::IceCandidate(
+                Box::new(cand),
+            )));
     }
 
     fn on_connection_state_change(&mut self, state: ConnectionState) {

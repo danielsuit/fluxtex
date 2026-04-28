@@ -39,8 +39,9 @@ pub fn render_pdf_to_png(pdf_bytes: &[u8]) -> Result<Vec<RenderedPage>, String> 
     let bindings = match locate_pdfium_dylib() {
         Some(path) => Pdfium::bind_to_library(&path)
             .map_err(|e| format!("Failed to bind pdfium at {}: {}", path.display(), e))?,
-        None => Pdfium::bind_to_system_library()
-            .map_err(|e| format!("Failed to bind pdfium: {}", e))?,
+        None => {
+            Pdfium::bind_to_system_library().map_err(|e| format!("Failed to bind pdfium: {}", e))?
+        }
     };
     let pdfium = Pdfium::new(bindings);
 
